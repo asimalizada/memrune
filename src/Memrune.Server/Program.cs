@@ -24,6 +24,7 @@ try
     Task running = server.RunAsync(shutdown.Token);
     Console.WriteLine($"MEMRUNE listening on 127.0.0.1:{server.BoundPort}");
     await running;
+    Console.WriteLine("MEMRUNE stopped");
     return 0;
 }
 catch (Exception ex) when (ex is System.Net.Sockets.SocketException or IOException)

@@ -7,4 +7,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Memrune.Tests/Memrune.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Memrune.LoadTest/Memrune.LoadTest.csproj" />
+  </Folder>
 </Solution>
