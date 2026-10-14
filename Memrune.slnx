@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Memrune.Core/Memrune.Core.csproj" />
+    <Project Path="src/Memrune.Protocol/Memrune.Protocol.csproj" />
+    <Project Path="src/Memrune.Server/Memrune.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Memrune.Tests/Memrune.Tests.csproj" />
+  </Folder>
+</Solution>
