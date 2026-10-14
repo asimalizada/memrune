@@ -15,6 +15,9 @@ public static class RespWriter
                 await stream.WriteAsync(data, cancellationToken);
                 await WriteAsciiAsync(stream, "\r\n", cancellationToken);
                 break;
+            case RespKind.NullBulkString:
+                await WriteAsciiAsync(stream, "$-1\r\n", cancellationToken);
+                break;
             case RespKind.SimpleString:
             case RespKind.Error:
                 byte[] line = value.Data ?? throw new ArgumentException("Response text is required.");

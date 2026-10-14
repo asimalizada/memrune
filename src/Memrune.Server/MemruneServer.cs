@@ -6,10 +6,11 @@ using Memrune.Protocol;
 
 namespace Memrune.Server;
 
-public sealed class MemruneServer(int port = 6380)
+public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null)
 {
     private readonly TcpListener _listener = new(IPAddress.Loopback, ValidatePort(port));
     private readonly ConcurrentDictionary<TcpClient, ClientSession> _clients = new();
+    private readonly CommandExecutor _commands = new(store ?? new KeyValueStore());
 
     public int BoundPort => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
@@ -56,7 +57,7 @@ public sealed class MemruneServer(int port = 6380)
                 }
                 if (command is null) break;
 
-                var (response, close) = CommandExecutor.Execute(command);
+                var (response, close) = _commands.Execute(command);
                 await RespWriter.WriteAsync(stream, response, cancellationToken);
                 if (close) break;
             }
