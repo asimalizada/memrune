@@ -77,6 +77,10 @@ public sealed class BenchmarkToolTests
                 Assert.Equal(32, run.GetProperty("successfulOperations").GetInt64());
                 Assert.Equal(0, run.GetProperty("failedOperations").GetInt64());
                 Assert.True(run.GetProperty("p99Microseconds").GetDouble() >= 0);
+                Assert.True(run.GetProperty("clientCpuSeconds").GetDouble() >= 0);
+                Assert.True(run.GetProperty("clientAllocatedBytes").GetInt64() >= 0);
+                Assert.True(run.GetProperty("clientGen0Collections").GetInt32() >= 0);
+                Assert.True(run.TryGetProperty("clientCgroupThrottledPeriods", out _));
             }
             Assert.Equal(JsonValueKind.Object, json.RootElement.GetProperty("median").ValueKind);
         }

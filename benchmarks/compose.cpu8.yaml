@@ -1,0 +1,5 @@
+services:
+  memrune:
+    cpus: 8.0
+  redis:
+    cpus: 8.0

@@ -4,6 +4,8 @@ This is a local RESP2 comparison of Memrune and Redis 7. It is a diagnostic expe
 
 The controlled TCP_NODELAY and response-coalescing experiments are documented in [TRANSPORT.md](TRANSPORT.md). Their results are separate from the original Milestone 4 baseline.
 
+The server/client CPU quota and tail-latency investigation is documented in [TAIL.md](TAIL.md), with [individual results and analysis](results/m5b/report.md). It uses the same validated RESP2 client and keeps the earlier result sets intact.
+
 ## Environment
 
 `compose.yaml` runs Memrune, Redis, and the same .NET 10 benchmark client on a private Docker network. Neither server publishes a host port. Both servers have a two CPU and 1 GiB container limit; the client has the same limit. Memrune uses `--bind 0.0.0.0` only inside this network. Normal server execution still defaults to `127.0.0.1:6380`.

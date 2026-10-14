@@ -10,6 +10,7 @@ MEMRUNE is an experimental Redis-compatible in-memory database engine written fr
 - A bounded active-client count, connection-local protocol errors, cancellation of active clients, and a separate diagnostic load utility.
 - A Docker-based RESP2 benchmark client for local comparisons with Redis 7. See [benchmark instructions](benchmarks/README.md).
 - Opt-in TCP transport experiments for accepted-socket TCP_NODELAY and one-write RESP responses. See [Milestone 5A methods and results](benchmarks/TRANSPORT.md).
+- A controlled Milestone 5B investigation of server/client CPU quotas and pipelined PING tail latency. See [methods](benchmarks/TAIL.md) and [actual results](benchmarks/results/m5b/report.md).
 
 `src/Memrune.Protocol` handles framing, `src/Memrune.Core` handles commands and storage, and `src/Memrune.Server` owns the listener and connection lifecycle. `tests/Memrune.Tests` contains deterministic storage tests and real TCP tests on ephemeral ports. `tools/Memrune.LoadTest` has the original raw-TCP PING diagnostic mode and a separate `--benchmark` mode that uses the same RESP2 client for both Memrune and Redis.
 
@@ -45,7 +46,7 @@ dotnet run --project src/Memrune.Server
 
 It listens on `127.0.0.1:6380`. Use `dotnet run --project src/Memrune.Server -- --port 6381` for another port. `--bind IPv4-address` explicitly selects another interface for isolated container experiments. Press Ctrl+C to stop it.
 
-For transport experiments, add `--tcp-nodelay`, `--coalesce-responses`, or both after `--`. The original TCP and response-write behavior remains the default while the measured tail-latency tradeoff is investigated. These flags do not change command semantics.
+For transport experiments, add `--tcp-nodelay`, `--coalesce-responses`, or both after `--`. The original TCP and response-write behavior remains the default: Milestone 5B measured a high-concurrency P99 regression at the original two-CPU benchmark quota and found both server and benchmark-client resource pressure. These flags do not change command semantics.
 
 With the official Redis CLI installed, run in another terminal:
 

@@ -69,6 +69,14 @@ public static class BenchmarkRunner
         var clients = new BenchmarkClient?[options.Clients];
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         PhaseOutcome? measured = null;
+        double? clientCpuSeconds = null;
+        long? clientAllocatedBytes = null;
+        int? clientGen0Collections = null;
+        int? clientGen1Collections = null;
+        int? clientGen2Collections = null;
+        double? clientCgroupCpuSeconds = null;
+        long? clientCgroupThrottledPeriods = null;
+        double? clientCgroupThrottledSeconds = null;
         string? error = null;
         long[] latencyTicks = new long[options.Operations];
         try
@@ -89,8 +97,30 @@ public static class BenchmarkRunner
                     throw new InvalidDataException($"Warmup failed: {warmup.Error}");
             }
 
+            using var process = Process.GetCurrentProcess();
+            TimeSpan cpuBefore = process.TotalProcessorTime;
+            long allocatedBefore = GC.GetTotalAllocatedBytes(false);
+            int gen0Before = GC.CollectionCount(0);
+            int gen1Before = GC.CollectionCount(1);
+            int gen2Before = GC.CollectionCount(2);
+            CgroupCpuSnapshot? cgroupBefore = ReadCgroupCpu();
             measured = await RunPhaseAsync(connected, data, options,
                 options.Operations, latencyTicks, timeout.Token);
+            CgroupCpuSnapshot? cgroupAfter = ReadCgroupCpu();
+            clientCpuSeconds = (process.TotalProcessorTime - cpuBefore).TotalSeconds;
+            clientAllocatedBytes = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
+            clientGen0Collections = GC.CollectionCount(0) - gen0Before;
+            clientGen1Collections = GC.CollectionCount(1) - gen1Before;
+            clientGen2Collections = GC.CollectionCount(2) - gen2Before;
+            if (cgroupBefore is not null && cgroupAfter is not null)
+            {
+                clientCgroupCpuSeconds = (cgroupAfter.Value.UsageMicroseconds -
+                    cgroupBefore.Value.UsageMicroseconds) / 1_000_000.0;
+                clientCgroupThrottledPeriods = cgroupAfter.Value.ThrottledPeriods -
+                    cgroupBefore.Value.ThrottledPeriods;
+                clientCgroupThrottledSeconds = (cgroupAfter.Value.ThrottledMicroseconds -
+                    cgroupBefore.Value.ThrottledMicroseconds) / 1_000_000.0;
+            }
             if (measured.Successful != options.Operations)
                 error = measured.Error ?? "Incomplete measured phase.";
             else
@@ -124,7 +154,11 @@ public static class BenchmarkRunner
             p99 = Percentile(latencyTicks, 0.99);
         }
         return new BenchmarkRunResult(repetition, options.Operations, successful, failed,
-            elapsed, elapsed > 0 ? successful / elapsed : 0, p50, p95, p99, valid, error);
+            elapsed, elapsed > 0 ? successful / elapsed : 0, p50, p95, p99, valid, error,
+            clientCpuSeconds, clientAllocatedBytes, clientGen0Collections,
+            clientGen1Collections, clientGen2Collections,
+            clientCgroupCpuSeconds, clientCgroupThrottledPeriods,
+            clientCgroupThrottledSeconds);
     }
 
     private static async Task<PhaseOutcome> RunPhaseAsync(
@@ -317,6 +351,38 @@ public static class BenchmarkRunner
     private static string Append(string? first, string second) =>
         first is null ? second : first + "; " + second;
 
+    // Linux cgroup v2 counters are optional. Reading them outside the timed phase
+    // keeps this diagnostic portable and does not change request validation.
+    private static CgroupCpuSnapshot? ReadCgroupCpu()
+    {
+        const string path = "/sys/fs/cgroup/cpu.stat";
+        if (!File.Exists(path)) return null;
+        try
+        {
+            long? usage = null, periods = null, throttled = null;
+            foreach (string line in File.ReadLines(path))
+            {
+                string[] parts = line.Split(' ', 2);
+                if (parts.Length != 2 ||
+                    !long.TryParse(parts[1], NumberStyles.None,
+                        CultureInfo.InvariantCulture, out long value)) continue;
+                switch (parts[0])
+                {
+                    case "usage_usec": usage = value; break;
+                    case "nr_throttled": periods = value; break;
+                    case "throttled_usec": throttled = value; break;
+                }
+            }
+            return usage.HasValue && periods.HasValue && throttled.HasValue
+                ? new CgroupCpuSnapshot(usage.Value, periods.Value, throttled.Value)
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     private static double Percentile(long[] sortedTicks, double percentile)
     {
         int index = Math.Max(0, (int)Math.Ceiling(sortedTicks.Length * percentile) - 1);
@@ -374,13 +440,21 @@ public static class BenchmarkRunner
 
     private sealed record WorkerOutcome(long Successful, string? Error);
     private sealed record PhaseOutcome(long Successful, double ElapsedSeconds, string Error);
+    private readonly record struct CgroupCpuSnapshot(
+        long UsageMicroseconds, long ThrottledPeriods, long ThrottledMicroseconds);
 }
 
 public sealed record BenchmarkRunResult(
     int Repetition, long TotalOperations, long SuccessfulOperations, long FailedOperations,
     double ElapsedSeconds, double SuccessfulOpsPerSecond,
     double? P50Microseconds, double? P95Microseconds, double? P99Microseconds,
-    bool Valid, string? Error);
+    bool Valid, string? Error,
+    double? ClientCpuSeconds = null, long? ClientAllocatedBytes = null,
+    int? ClientGen0Collections = null, int? ClientGen1Collections = null,
+    int? ClientGen2Collections = null,
+    double? ClientCgroupCpuSeconds = null,
+    long? ClientCgroupThrottledPeriods = null,
+    double? ClientCgroupThrottledSeconds = null);
 
 public sealed record BenchmarkAggregate(
     double SuccessfulOpsPerSecond, double P50Microseconds,

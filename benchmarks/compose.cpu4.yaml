@@ -1,0 +1,5 @@
+services:
+  memrune:
+    cpus: 4.0
+  redis:
+    cpus: 4.0
