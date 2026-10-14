@@ -1,0 +1,33 @@
+services:
+  memrune:
+    build:
+      context: ..
+      dockerfile: benchmarks/Dockerfile
+      target: memrune
+    command: ["--bind", "0.0.0.0", "--port", "6380"]
+    cpus: 2.0
+    mem_limit: 1g
+    networks: [bench]
+
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--protected-mode", "no", "--bind", "0.0.0.0"]
+    cpus: 2.0
+    mem_limit: 1g
+    networks: [bench]
+
+  benchmark:
+    build:
+      context: ..
+      dockerfile: benchmarks/Dockerfile
+      target: benchmark
+    profiles: [runner]
+    cpus: 2.0
+    mem_limit: 1g
+    networks: [bench]
+    volumes:
+      - ./results/raw:/results
+
+networks:
+  bench:
+    internal: true

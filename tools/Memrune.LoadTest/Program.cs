@@ -4,6 +4,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
+if (args.Length > 0 && args[0] == "--benchmark")
+    return await BenchmarkRunner.RunAsync(args[1..]);
+
 int port = 6380;
 int clients = 100;
 int operations = 100;

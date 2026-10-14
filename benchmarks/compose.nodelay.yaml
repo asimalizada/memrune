@@ -1,0 +1,3 @@
+services:
+  memrune:
+    command: ["--bind", "0.0.0.0", "--port", "6380", "--tcp-nodelay"]

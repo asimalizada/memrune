@@ -17,5 +17,6 @@
     <ProjectReference Include="..\..\src\Memrune.Server\Memrune.Server.csproj" />
     <ProjectReference Include="..\..\src\Memrune.Protocol\Memrune.Protocol.csproj" />
     <ProjectReference Include="..\..\src\Memrune.Core\Memrune.Core.csproj" />
+    <ProjectReference Include="..\..\tools\Memrune.LoadTest\Memrune.LoadTest.csproj" />
   </ItemGroup>
 </Project>

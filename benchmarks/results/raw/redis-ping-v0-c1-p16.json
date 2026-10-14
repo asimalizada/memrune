@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "capturedUtc": "2026-10-14T13:01:15.3912658+00:00",
+  "host": "redis",
+  "port": 6379,
+  "workload": "ping",
+  "clients": 1,
+  "operations": 512,
+  "pipelineDepth": 16,
+  "valueSize": 0,
+  "warmupOperations": 8,
+  "repetitions": 3,
+  "keyCount": 1024,
+  "latencyDefinition": "Client-observed time from submitting a batch to full receipt and validation of each reply; all commands in one batch share its submission timestamp.",
+  "clientRuntimeVersion": "10.0.13",
+  "clientOs": "Ubuntu 24.04.5 LTS",
+  "stopwatchFrequency": 1000000000,
+  "runs": [
+    {
+      "repetition": 1,
+      "totalOperations": 512,
+      "successfulOperations": 512,
+      "failedOperations": 0,
+      "elapsedSeconds": 0.0056923,
+      "successfulOpsPerSecond": 89946.0674946858,
+      "p50Microseconds": 96.303,
+      "p95Microseconds": 289.409,
+      "p99Microseconds": 2181.268,
+      "valid": true,
+      "error": null
+    },
+    {
+      "repetition": 2,
+      "totalOperations": 512,
+      "successfulOperations": 512,
+      "failedOperations": 0,
+      "elapsedSeconds": 0.0033077,
+      "successfulOpsPerSecond": 154790.3376968891,
+      "p50Microseconds": 94.503,
+      "p95Microseconds": 117.104,
+      "p99Microseconds": 134.505,
+      "valid": true,
+      "error": null
+    },
+    {
+      "repetition": 3,
+      "totalOperations": 512,
+      "successfulOperations": 512,
+      "failedOperations": 0,
+      "elapsedSeconds": 0.0035301,
+      "successfulOpsPerSecond": 145038.38418175123,
+      "p50Microseconds": 100.003,
+      "p95Microseconds": 131.104,
+      "p99Microseconds": 137.405,
+      "valid": true,
+      "error": null
+    }
+  ],
+  "median": {
+    "successfulOpsPerSecond": 145038.38418175123,
+    "p50Microseconds": 96.303,
+    "p95Microseconds": 131.104,
+    "p99Microseconds": 137.405
+  }
+}

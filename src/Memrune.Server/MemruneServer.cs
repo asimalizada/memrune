@@ -6,14 +6,18 @@ using Memrune.Protocol;
 
 namespace Memrune.Server;
 
-public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, int maxClients = 512)
+public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, int maxClients = 512, IPAddress? bindAddress = null, bool tcpNoDelay = false, bool coalesceResponses = false)
 {
-    private readonly TcpListener _listener = new(IPAddress.Loopback, ValidatePort(port));
+    private readonly TcpListener _listener = new(bindAddress ?? IPAddress.Loopback, ValidatePort(port));
     private readonly ConcurrentDictionary<TcpClient, ClientSession> _clients = new();
     private readonly CommandExecutor _commands = new(store ?? new KeyValueStore());
     private readonly SemaphoreSlim _clientSlots = new(ValidateMaxClients(maxClients), maxClients);
 
+    private readonly bool _tcpNoDelay = tcpNoDelay;
+    private readonly bool _coalesceResponses = coalesceResponses;
+
     public int BoundPort => ((IPEndPoint)_listener.LocalEndpoint).Port;
+    public IPAddress BoundAddress => ((IPEndPoint)_listener.LocalEndpoint).Address;
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -25,6 +29,16 @@ public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, 
                 TcpClient client;
                 try { client = await _listener.AcceptTcpClientAsync(cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+
+                if (_tcpNoDelay)
+                {
+                    try { client.NoDelay = true; }
+                    catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+                    {
+                        client.Dispose();
+                        continue;
+                    }
+                }
 
                 if (!_clientSlots.Wait(0))
                 {
@@ -76,19 +90,20 @@ public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, 
         {
             await using NetworkStream stream = client.GetStream();
             var reader = new RespReader(stream);
+            var responseWriter = _coalesceResponses ? new RespCoalescedWriter() : null;
             while (!cancellationToken.IsCancellationRequested)
             {
                 byte[][]? command;
                 try { command = await reader.ReadCommandAsync(cancellationToken); }
                 catch (RespProtocolException ex)
                 {
-                    await RespWriter.WriteAsync(stream, RespValue.Error($"ERR Protocol error: {ex.Message}"), cancellationToken);
+                    await WriteResponseAsync(stream, RespValue.Error($"ERR Protocol error: {ex.Message}"), responseWriter, cancellationToken);
                     break; // A malformed frame cannot be safely resynchronized.
                 }
                 if (command is null) break;
 
                 var (response, close) = _commands.Execute(command);
-                await RespWriter.WriteAsync(stream, response, cancellationToken);
+                await WriteResponseAsync(stream, response, responseWriter, cancellationToken);
                 if (close) break;
             }
         }
@@ -107,6 +122,12 @@ public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, 
             _clientSlots.Release();
         }
     }
+
+    private static Task WriteResponseAsync(Stream stream, RespValue response,
+        RespCoalescedWriter? writer, CancellationToken cancellationToken) =>
+        writer is null
+            ? RespWriter.WriteAsync(stream, response, cancellationToken)
+            : writer.WriteAsync(stream, response, cancellationToken);
 
     private static int ValidatePort(int port) => port is >= 0 and <= 65535
         ? port : throw new ArgumentOutOfRangeException(nameof(port));

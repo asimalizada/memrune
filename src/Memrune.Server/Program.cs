@@ -1,14 +1,40 @@
+using System.Net;
+using System.Net.Sockets;
 using Memrune.Server;
 
 int port = 6380;
-if (args.Length != 0)
+IPAddress bindAddress = IPAddress.Loopback;
+bool tcpNoDelay = false;
+bool coalesceResponses = false;
+
+for (int i = 0; i < args.Length;)
 {
-    if (args.Length != 2 || args[0] != "--port" ||
-        !int.TryParse(args[1], out port) || port is < 1 or > 65535)
+    if (args[i] == "--coalesce-responses")
     {
-        Console.Error.WriteLine("Usage: Memrune.Server [--port 1-65535]");
-        return 2;
+        coalesceResponses = true;
+        i++;
+        continue;
     }
+    if (args[i] == "--tcp-nodelay")
+    {
+        tcpNoDelay = true;
+        i++;
+        continue;
+    }
+    if (i + 1 >= args.Length) return Usage();
+    switch (args[i])
+    {
+        case "--port" when int.TryParse(args[i + 1], out int parsedPort) && parsedPort is >= 1 and <= 65535:
+            port = parsedPort;
+            break;
+        case "--bind" when IPAddress.TryParse(args[i + 1], out IPAddress? parsedAddress)
+                           && parsedAddress.AddressFamily == AddressFamily.InterNetwork:
+            bindAddress = parsedAddress;
+            break;
+        default:
+            return Usage();
+    }
+    i += 2;
 }
 
 using var shutdown = new CancellationTokenSource();
@@ -20,15 +46,21 @@ Console.CancelKeyPress += (_, e) =>
 
 try
 {
-    var server = new MemruneServer(port);
+    var server = new MemruneServer(port, bindAddress: bindAddress, tcpNoDelay: tcpNoDelay, coalesceResponses: coalesceResponses);
     Task running = server.RunAsync(shutdown.Token);
-    Console.WriteLine($"MEMRUNE listening on 127.0.0.1:{server.BoundPort}");
+    Console.WriteLine($"MEMRUNE listening on {server.BoundAddress}:{server.BoundPort}");
     await running;
     Console.WriteLine("MEMRUNE stopped");
     return 0;
 }
-catch (Exception ex) when (ex is System.Net.Sockets.SocketException or IOException)
+catch (Exception ex) when (ex is SocketException or IOException)
 {
     Console.Error.WriteLine($"Server error: {ex.Message}");
     return 1;
+}
+
+static int Usage()
+{
+    Console.Error.WriteLine("Usage: Memrune.Server [--port 1-65535] [--bind IPv4-address] [--tcp-nodelay] [--coalesce-responses]");
+    return 2;
 }

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "capturedUtc": "2026-10-14T13:00:52.8478683+00:00",
+  "host": "memrune",
+  "port": 6380,
+  "workload": "set",
+  "clients": 1,
+  "operations": 32,
+  "pipelineDepth": 1,
+  "valueSize": 32,
+  "warmupOperations": 8,
+  "repetitions": 3,
+  "keyCount": 1024,
+  "latencyDefinition": "Client-observed time from submitting a batch to full receipt and validation of each reply; all commands in one batch share its submission timestamp.",
+  "clientRuntimeVersion": "10.0.13",
+  "clientOs": "Ubuntu 24.04.5 LTS",
+  "stopwatchFrequency": 1000000000,
+  "runs": [
+    {
+      "repetition": 1,
+      "totalOperations": 32,
+      "successfulOperations": 32,
+      "failedOperations": 0,
+      "elapsedSeconds": 1.4098735,
+      "successfulOpsPerSecond": 22.697071758565574,
+      "p50Microseconds": 43998.817,
+      "p95Microseconds": 44235.625,
+      "p99Microseconds": 47889.334,
+      "valid": true,
+      "error": null
+    },
+    {
+      "repetition": 2,
+      "totalOperations": 32,
+      "successfulOperations": 32,
+      "failedOperations": 0,
+      "elapsedSeconds": 1.4075587,
+      "successfulOpsPerSecond": 22.734398217282163,
+      "p50Microseconds": 43990.14,
+      "p95Microseconds": 44112.443,
+      "p99Microseconds": 44401.754,
+      "valid": true,
+      "error": null
+    },
+    {
+      "repetition": 3,
+      "totalOperations": 32,
+      "successfulOperations": 32,
+      "failedOperations": 0,
+      "elapsedSeconds": 1.4120253,
+      "successfulOpsPerSecond": 22.662483455501825,
+      "p50Microseconds": 44003.141,
+      "p95Microseconds": 44329.751,
+      "p99Microseconds": 47991.471,
+      "valid": true,
+      "error": null
+    }
+  ],
+  "median": {
+    "successfulOpsPerSecond": 22.697071758565574,
+    "p50Microseconds": 43998.817,
+    "p95Microseconds": 44235.625,
+    "p99Microseconds": 47889.334
+  }
+}

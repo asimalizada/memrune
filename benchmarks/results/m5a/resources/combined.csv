@@ -1,0 +1,3 @@
+"target","workload","value_bytes","clients","operations_per_repetition","pipeline","warmup_per_repetition","repetitions","process_cpu_seconds","container_cpu_seconds","container_throttled_periods","container_throttled_seconds_counter","container_memory_peak_bytes_since_start"
+"memrune","ping","0","100","51200","16","800","3","3.81","3.873444","11","4.180611","33214464"
+"redis","ping","0","100","51200","16","800","3","0.27","0.328782","0","0","32202752"
