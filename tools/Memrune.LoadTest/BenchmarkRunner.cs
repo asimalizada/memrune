@@ -18,7 +18,8 @@ public static class BenchmarkRunner
             Console.Error.WriteLine(error);
             Console.Error.WriteLine("Usage: --benchmark --host HOST --port PORT --workload ping|set|get " +
                 "--clients N --operations TOTAL --pipeline N --value-size BYTES " +
-                "--warmup TOTAL --repetitions N --keys N [--output FILE]");
+                "--warmup TOTAL --repetitions N --keys N [--rate OPS_PER_SECOND] " +
+                "[--max-lag-ms N] [--request-timeout-ms N] [--output FILE]");
             return 2;
         }
 
@@ -39,9 +40,12 @@ public static class BenchmarkRunner
             options.Workload.ToString().ToLowerInvariant(), options.Clients,
             options.Operations, options.PipelineDepth, options.ValueSize,
             options.WarmupOperations, options.Repetitions, options.KeyCount,
-            "Client-observed time from submitting a batch to full receipt and validation of each reply; all commands in one batch share its submission timestamp.",
+            options.OfferedRate.HasValue
+                ? "Scheduled arrival to validated reply, including client submission delay and queueing; fixed-rate mode requires pipeline depth 1."
+                : "Client-observed time from submitting a batch to full receipt and validation of each reply; all commands in one batch share its submission timestamp.",
             Environment.Version.ToString(), RuntimeInformation.OSDescription,
-            Stopwatch.Frequency, runs, aggregate);
+            Stopwatch.Frequency, runs, aggregate,
+            options.OfferedRate.HasValue ? "fixedRate" : "closedLoop", options.OfferedRate);
 
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
@@ -79,6 +83,8 @@ public static class BenchmarkRunner
         double? clientCgroupThrottledSeconds = null;
         string? error = null;
         long[] latencyTicks = new long[options.Operations];
+        long[]? submissionLagTicks = options.OfferedRate.HasValue
+            ? new long[options.Operations] : null;
         try
         {
             await Task.WhenAll(Enumerable.Range(0, clients.Length).Select(async index =>
@@ -91,8 +97,11 @@ public static class BenchmarkRunner
 
             if (options.WarmupOperations > 0)
             {
-                PhaseOutcome warmup = await RunPhaseAsync(connected, data, options,
-                    options.WarmupOperations, null, timeout.Token);
+                PhaseOutcome warmup = options.OfferedRate.HasValue
+                    ? await RunFixedRatePhaseAsync(connected, data, options,
+                        options.WarmupOperations, null, null, timeout.Token)
+                    : await RunPhaseAsync(connected, data, options,
+                        options.WarmupOperations, null, timeout.Token);
                 if (warmup.Successful != options.WarmupOperations)
                     throw new InvalidDataException($"Warmup failed: {warmup.Error}");
             }
@@ -104,8 +113,11 @@ public static class BenchmarkRunner
             int gen1Before = GC.CollectionCount(1);
             int gen2Before = GC.CollectionCount(2);
             CgroupCpuSnapshot? cgroupBefore = ReadCgroupCpu();
-            measured = await RunPhaseAsync(connected, data, options,
-                options.Operations, latencyTicks, timeout.Token);
+            measured = options.OfferedRate.HasValue
+                ? await RunFixedRatePhaseAsync(connected, data, options,
+                    options.Operations, latencyTicks, submissionLagTicks, timeout.Token)
+                : await RunPhaseAsync(connected, data, options,
+                    options.Operations, latencyTicks, timeout.Token);
             CgroupCpuSnapshot? cgroupAfter = ReadCgroupCpu();
             clientCpuSeconds = (process.TotalProcessorTime - cpuBefore).TotalSeconds;
             clientAllocatedBytes = GC.GetTotalAllocatedBytes(false) - allocatedBefore;
@@ -122,7 +134,10 @@ public static class BenchmarkRunner
                     cgroupBefore.Value.ThrottledMicroseconds) / 1_000_000.0;
             }
             if (measured.Successful != options.Operations)
-                error = measured.Error ?? "Incomplete measured phase.";
+                error = string.IsNullOrEmpty(measured.Error) ? "Incomplete measured phase." : measured.Error;
+            else if (options.OfferedRate is int rate &&
+                     measured.Successful / measured.ElapsedSeconds < rate * 0.95)
+                error = "Achieved rate was below 95% of intended offered rate.";
             else
                 await CheckForExtraRepliesAsync(connected, timeout.Token);
         }
@@ -146,19 +161,33 @@ public static class BenchmarkRunner
         bool valid = error is null && failed == 0;
         double elapsed = measured?.ElapsedSeconds ?? 0;
         double? p50 = null, p95 = null, p99 = null;
+        double? lagP50 = null, lagP95 = null, lagP99 = null;
         if (valid)
         {
             Array.Sort(latencyTicks);
             p50 = Percentile(latencyTicks, 0.50);
             p95 = Percentile(latencyTicks, 0.95);
             p99 = Percentile(latencyTicks, 0.99);
+            if (submissionLagTicks is not null)
+            {
+                Array.Sort(submissionLagTicks);
+                lagP50 = Percentile(submissionLagTicks, 0.50);
+                lagP95 = Percentile(submissionLagTicks, 0.95);
+                lagP99 = Percentile(submissionLagTicks, 0.99);
+            }
         }
         return new BenchmarkRunResult(repetition, options.Operations, successful, failed,
             elapsed, elapsed > 0 ? successful / elapsed : 0, p50, p95, p99, valid, error,
             clientCpuSeconds, clientAllocatedBytes, clientGen0Collections,
             clientGen1Collections, clientGen2Collections,
             clientCgroupCpuSeconds, clientCgroupThrottledPeriods,
-            clientCgroupThrottledSeconds);
+            clientCgroupThrottledSeconds,
+            options.OfferedRate, options.OfferedRate.HasValue ? measured?.Submitted : null,
+            options.OfferedRate.HasValue ? options.Operations - (measured?.Submitted ?? 0) : null,
+            options.OfferedRate.HasValue ? measured?.Late : null,
+            options.OfferedRate.HasValue ? measured?.MaxLagTicks * 1_000_000.0 / Stopwatch.Frequency : null,
+            options.OfferedRate.HasValue ? measured?.Timeouts : null,
+            lagP50, lagP95, lagP99);
     }
 
     private static async Task<PhaseOutcome> RunPhaseAsync(
@@ -208,19 +237,8 @@ public static class BenchmarkRunner
                 for (int i = 0; i < count; i++)
                 {
                     int index = indices[i];
-                    switch (workload)
-                    {
-                        case BenchmarkWorkload.Ping:
-                            await client.Reader.ReadSimpleAsync(PingReply, cancellationToken);
-                            break;
-                        case BenchmarkWorkload.Set:
-                            await client.Reader.ReadSimpleAsync(OkReply, cancellationToken);
-                            break;
-                        case BenchmarkWorkload.Get:
-                            await client.Reader.ReadBulkAsync(data.Values[index % data.Values.Length],
-                                cancellationToken);
-                            break;
-                    }
+                    await ReadExpectedAsync(client, data, workload, index, cancellationToken);
+
                     if (latencyTicks is not null)
                         latencyTicks[index] = Stopwatch.GetTimestamp() - submittedAt;
                     successful++;
@@ -234,6 +252,113 @@ public static class BenchmarkRunner
                 $"client {clientIndex}: {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    // Fixed-rate mode uses one in-flight request per connection. Every operation has
+    // a global scheduled arrival, even if the client or server falls behind.
+    private static async Task<PhaseOutcome> RunFixedRatePhaseAsync(
+        BenchmarkClient[] clients, WorkloadData data, BenchmarkOptions options,
+        int operations, long[]? latencyTicks, long[]? submissionLagTicks,
+        CancellationToken cancellationToken)
+    {
+        var start = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<WorkerOutcome>[] workers = Enumerable.Range(0, clients.Length)
+            .Select(index => RunFixedRateWorkerAsync(clients[index], index, clients.Length,
+                operations, data, options, latencyTicks, submissionLagTicks,
+                start.Task, cancellationToken))
+            .ToArray();
+        long startedAt = Stopwatch.GetTimestamp();
+        start.SetResult(startedAt);
+        WorkerOutcome[] outcomes = await Task.WhenAll(workers);
+        double elapsed = Stopwatch.GetElapsedTime(startedAt).TotalSeconds;
+        return new PhaseOutcome(outcomes.Sum(result => result.Successful), elapsed,
+            string.Join("; ", outcomes.Where(result => result.Error is not null)
+                .Select(result => result.Error).Take(5)),
+            outcomes.Sum(result => result.Submitted), outcomes.Sum(result => result.Late),
+            outcomes.Max(result => result.MaxLagTicks), outcomes.Sum(result => result.Timeouts));
+    }
+
+    private static async Task<WorkerOutcome> RunFixedRateWorkerAsync(
+        BenchmarkClient client, int clientIndex, int clientCount, int operationCount,
+        WorkloadData data, BenchmarkOptions options, long[]? latencyTicks,
+        long[]? submissionLagTicks, Task<long> start, CancellationToken cancellationToken)
+    {
+        long successful = 0, submitted = 0, late = 0, maxLagTicks = 0;
+        int timeouts = 0;
+        int current = clientIndex;
+        try
+        {
+            long startedAt = await start;
+            long maxAllowedLagTicks = options.MaxLagMilliseconds * Stopwatch.Frequency / 1000;
+            long lateThresholdTicks = Stopwatch.Frequency / 1000;
+            using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            for (; current < operationCount; current += clientCount)
+            {
+                long scheduledAt = startedAt + current * Stopwatch.Frequency / options.OfferedRate!.Value;
+                await WaitUntilAsync(scheduledAt, cancellationToken);
+                long lagTicks = Math.Max(0, Stopwatch.GetTimestamp() - scheduledAt);
+                maxLagTicks = Math.Max(maxLagTicks, lagTicks);
+                if (submissionLagTicks is not null) submissionLagTicks[current] = lagTicks;
+                if (lagTicks > maxAllowedLagTicks)
+                    return new WorkerOutcome(successful,
+                        $"client {clientIndex}: submission lag exceeded {options.MaxLagMilliseconds} ms",
+                        submitted, late, maxLagTicks, timeouts);
+                if (lagTicks >= lateThresholdTicks) late++;
+
+                requestTimeout.CancelAfter(options.RequestTimeoutMilliseconds);
+                submitted++; // A failed write or reply is incomplete, never silently omitted.
+                try
+                {
+                    await client.Stream.WriteAsync(data.RequestFor(options.Workload, current),
+                        requestTimeout.Token);
+                    await ReadExpectedAsync(client, data, options.Workload, current,
+                        requestTimeout.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    timeouts++;
+                    return new WorkerOutcome(successful,
+                        $"client {clientIndex}: request timed out",
+                        submitted, late, maxLagTicks, timeouts);
+                }
+                requestTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
+                if (latencyTicks is not null)
+                    latencyTicks[current] = Stopwatch.GetTimestamp() - scheduledAt;
+                successful++;
+            }
+            return new WorkerOutcome(successful, null, submitted, late, maxLagTicks, timeouts);
+        }
+        catch (Exception ex)
+        {
+            return new WorkerOutcome(successful,
+                $"client {clientIndex}: {ex.GetType().Name}: {ex.Message}",
+                submitted, late, maxLagTicks, timeouts);
+        }
+    }
+
+    private static async Task WaitUntilAsync(long scheduledAt, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            long remaining = scheduledAt - Stopwatch.GetTimestamp();
+            if (remaining <= 0) return;
+            // Timer waits may wake late; the recorded submission lag exposes that
+            // scheduler cost instead of burning a CPU near every deadline.
+            await Task.Delay(TimeSpan.FromSeconds((double)remaining / Stopwatch.Frequency),
+                cancellationToken);
+        }
+    }
+
+    private static Task ReadExpectedAsync(BenchmarkClient client, WorkloadData data,
+        BenchmarkWorkload workload, int operation, CancellationToken cancellationToken) =>
+        workload switch
+        {
+            BenchmarkWorkload.Ping => client.Reader.ReadSimpleAsync(PingReply, cancellationToken),
+            BenchmarkWorkload.Set => client.Reader.ReadSimpleAsync(OkReply, cancellationToken),
+            BenchmarkWorkload.Get => client.Reader.ReadBulkAsync(
+                data.Values[operation % data.Values.Length], cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(workload))
+        };
 
     private static async Task PrepareDatasetAsync(BenchmarkClient client,
         WorkloadData data, CancellationToken cancellationToken)
@@ -438,8 +563,10 @@ public static class BenchmarkRunner
         }
     }
 
-    private sealed record WorkerOutcome(long Successful, string? Error);
-    private sealed record PhaseOutcome(long Successful, double ElapsedSeconds, string Error);
+    private sealed record WorkerOutcome(long Successful, string? Error,
+        long Submitted = 0, long Late = 0, long MaxLagTicks = 0, int Timeouts = 0);
+    private sealed record PhaseOutcome(long Successful, double ElapsedSeconds, string Error,
+        long Submitted = 0, long Late = 0, long MaxLagTicks = 0, int Timeouts = 0);
     private readonly record struct CgroupCpuSnapshot(
         long UsageMicroseconds, long ThrottledPeriods, long ThrottledMicroseconds);
 }
@@ -454,7 +581,13 @@ public sealed record BenchmarkRunResult(
     int? ClientGen2Collections = null,
     double? ClientCgroupCpuSeconds = null,
     long? ClientCgroupThrottledPeriods = null,
-    double? ClientCgroupThrottledSeconds = null);
+    double? ClientCgroupThrottledSeconds = null,
+    int? IntendedOfferedRate = null, long? SubmittedOperations = null,
+    long? UnsubmittedOperations = null, long? LateSubmissions = null,
+    double? MaxSubmissionLagMicroseconds = null, int? TimedOutOperations = null,
+    double? SubmissionLagP50Microseconds = null,
+    double? SubmissionLagP95Microseconds = null,
+    double? SubmissionLagP99Microseconds = null);
 
 public sealed record BenchmarkAggregate(
     double SuccessfulOpsPerSecond, double P50Microseconds,
@@ -466,4 +599,5 @@ public sealed record BenchmarkReport(
     int ValueSize, int WarmupOperations, int Repetitions, int KeyCount,
     string LatencyDefinition, string ClientRuntimeVersion, string ClientOs,
     long StopwatchFrequency, IReadOnlyList<BenchmarkRunResult> Runs,
-    BenchmarkAggregate? Median);
+    BenchmarkAggregate? Median,
+    string Mode = "closedLoop", int? IntendedOfferedRate = null);

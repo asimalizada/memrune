@@ -115,9 +115,16 @@ public sealed class RespBenchmarkReader(Stream stream, int maxPayload)
         }
     }
 
-    private async Task<int> ReadRequiredByteAsync(CancellationToken cancellationToken)
+    private ValueTask<int> ReadRequiredByteAsync(CancellationToken cancellationToken)
     {
-        if (_position == _length && await FillAsync(cancellationToken) == 0)
+        if (_position < _length)
+            return ValueTask.FromResult((int)_receive[_position++]);
+        return ReadRequiredSlowAsync(cancellationToken);
+    }
+
+    private async ValueTask<int> ReadRequiredSlowAsync(CancellationToken cancellationToken)
+    {
+        if (await FillAsync(cancellationToken) == 0)
             throw new EndOfStreamException("Incomplete RESP response.");
         return _receive[_position++];
     }

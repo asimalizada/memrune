@@ -1,11 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using Memrune.Server;
 
 int port = 6380;
 IPAddress bindAddress = IPAddress.Loopback;
-bool tcpNoDelay = false;
-bool coalesceResponses = false;
+bool tcpNoDelay = true;
+bool coalesceResponses = true;
 
 for (int i = 0; i < args.Length;)
 {
@@ -18,6 +19,18 @@ for (int i = 0; i < args.Length;)
     if (args[i] == "--tcp-nodelay")
     {
         tcpNoDelay = true;
+        i++;
+        continue;
+    }
+    if (args[i] == "--no-coalesce-responses")
+    {
+        coalesceResponses = false;
+        i++;
+        continue;
+    }
+    if (args[i] == "--no-tcp-nodelay")
+    {
+        tcpNoDelay = false;
         i++;
         continue;
     }
@@ -38,6 +51,13 @@ for (int i = 0; i < args.Length;)
 }
 
 using var shutdown = new CancellationTokenSource();
+using PosixSignalRegistration? terminate = OperatingSystem.IsLinux()
+    ? PosixSignalRegistration.Create(PosixSignal.SIGTERM, signal =>
+    {
+        signal.Cancel = true;
+        shutdown.Cancel();
+    })
+    : null;
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
@@ -61,6 +81,6 @@ catch (Exception ex) when (ex is SocketException or IOException)
 
 static int Usage()
 {
-    Console.Error.WriteLine("Usage: Memrune.Server [--port 1-65535] [--bind IPv4-address] [--tcp-nodelay] [--coalesce-responses]");
+    Console.Error.WriteLine("Usage: Memrune.Server [--port 1-65535] [--bind IPv4-address] [--tcp-nodelay|--no-tcp-nodelay] [--coalesce-responses|--no-coalesce-responses]");
     return 2;
 }

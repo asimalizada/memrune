@@ -8,7 +8,40 @@ namespace Memrune.Tests;
 
 public sealed class TransportExperimentTests
 {
-    [Fact]
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ExplicitTransportModesKeepPipelinedRepliesOrdered(
+        bool noDelay, bool coalesced)
+    {
+        using var shutdown = new CancellationTokenSource();
+        var server = new MemruneServer(0, tcpNoDelay: noDelay,
+            coalesceResponses: coalesced);
+        Task running = server.RunAsync(shutdown.Token);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var client = new TcpClient { NoDelay = true };
+            await client.ConnectAsync(IPAddress.Loopback, server.BoundPort, timeout.Token);
+            byte[] binary = [0, 13, 10, 255];
+            await client.GetStream().WriteAsync(Concat(
+                Frame(Ascii("PING")), Frame(Ascii("ECHO"), binary),
+                Frame(Ascii("PING"))), timeout.Token);
+            byte[] expected = Concat(Ascii("+PONG\r\n$4\r\n"), binary,
+                Ascii("\r\n+PONG\r\n"));
+            byte[] actual = new byte[expected.Length];
+            await client.GetStream().ReadExactlyAsync(actual, timeout.Token);
+            Assert.Equal(expected, actual);
+        }
+        finally
+        {
+            shutdown.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+[Fact]
     public async Task TcpListenerAcceptedSocketDefaultsToNoDelayDisabled()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

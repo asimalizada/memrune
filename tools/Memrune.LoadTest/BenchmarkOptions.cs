@@ -13,13 +13,18 @@ public sealed record BenchmarkOptions(
     int WarmupOperations,
     int Repetitions,
     int KeyCount,
-    string? Output)
+    string? Output,
+    int? OfferedRate = null,
+    int MaxLagMilliseconds = 20,
+    int RequestTimeoutMilliseconds = 5000)
 {
     public static bool TryParse(string[] args, out BenchmarkOptions? options, out string error)
     {
         string host = "127.0.0.1";
         int port = 6380, clients = 1, operations = 0, pipeline = 1;
         int valueSize = 32, warmup = 0, repetitions = 3, keys = 1024;
+        int? offeredRate = null;
+        int maxLagMilliseconds = 20, requestTimeoutMilliseconds = 5000;
         bool operationsSpecified = false, warmupSpecified = false;
         string? output = null;
         BenchmarkWorkload workload = BenchmarkWorkload.Ping;
@@ -48,6 +53,9 @@ public sealed record BenchmarkOptions(
                 case "--repetitions" when ParseInt(value, out int parsedRepetitions): repetitions = parsedRepetitions; break;
                 case "--keys" when ParseInt(value, out int parsedKeys): keys = parsedKeys; break;
                 case "--output": output = value; break;
+                case "--rate" when ParseInt(value, out int parsedRate): offeredRate = parsedRate; break;
+                case "--max-lag-ms" when ParseInt(value, out int parsedLag): maxLagMilliseconds = parsedLag; break;
+                case "--request-timeout-ms" when ParseInt(value, out int parsedTimeout): requestTimeoutMilliseconds = parsedTimeout; break;
                 case "--workload" when value.Equals("ping", StringComparison.OrdinalIgnoreCase):
                     workload = BenchmarkWorkload.Ping; break;
                 case "--workload" when value.Equals("set", StringComparison.OrdinalIgnoreCase):
@@ -61,9 +69,12 @@ public sealed record BenchmarkOptions(
         }
 
         if (!operationsSpecified)
-            operations = Math.Max(128, clients * (pipeline == 1 ? 64 : 512));
+            operations = offeredRate is int rate ? (int)Math.Min((long)rate * 3, 1_000_000) :
+                Math.Max(128, clients * (pipeline == 1 ? 64 : 512));
         if (!warmupSpecified)
-            warmup = clients * 8;
+            warmup = offeredRate is int fixedRate
+                ? (int)Math.Min(1_000_000L, Math.Max((long)clients * 8, (long)fixedRate * 2))
+                : clients * 8;
 
         if (string.IsNullOrWhiteSpace(host) || port is < 1 or > 65535 ||
             clients is < 1 or > 512 || operations is < 1 or > 1_000_000 ||
@@ -71,6 +82,9 @@ public sealed record BenchmarkOptions(
             valueSize is < 0 or > 1024 * 1024 || warmup is < 0 or > 1_000_000 ||
             repetitions is < 1 or > 20 || keys is < 1 or > 100_000 ||
             (workload != BenchmarkWorkload.Ping && valueSize == 0) ||
+            (offeredRate is int requestedRate && (requestedRate is < 1 or > 100_000 || pipeline != 1)) ||
+            maxLagMilliseconds is < 1 or > 10_000 ||
+            requestTimeoutMilliseconds is < 1 or > 60_000 ||
             (output is not null && string.IsNullOrWhiteSpace(output)) ||
             (long)pipeline * (valueSize + 256L) > 4L * 1024 * 1024 ||
             (long)clients * pipeline * (valueSize + 256L) > 256L * 1024 * 1024 ||
@@ -81,7 +95,8 @@ public sealed record BenchmarkOptions(
             return false;
         }
         options = new(host, port, workload, clients, operations, pipeline,
-            valueSize, warmup, repetitions, keys, output);
+            valueSize, warmup, repetitions, keys, output, offeredRate,
+            maxLagMilliseconds, requestTimeoutMilliseconds);
         return true;
     }
 

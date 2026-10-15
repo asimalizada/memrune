@@ -12,6 +12,9 @@ $compose = Join-Path $PSScriptRoot 'compose.yaml'
 $raw = Join-Path $PSScriptRoot "results/raw/$ResultSubdirectory"
 $outputDirectory = if ($ResultSubdirectory) { "/results/$ResultSubdirectory" } else { '/results' }
 New-Item -ItemType Directory -Force -Path $raw | Out-Null
+if (@(Get-ChildItem -LiteralPath $raw -Filter '*.json' -File).Count -gt 0) {
+    throw "Result directory already contains JSON: $raw. Choose a fresh -ResultSubdirectory."
+}
 
 $configNumber = 0
 $failures = @()

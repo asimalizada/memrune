@@ -1,0 +1,11 @@
+"phase","repetition","target","workload","intended_rate","clients","client_cpus","valid","successful","client_cpu_seconds","client_allocated_bytes","maximum_submission_lag_us","error"
+"before","1","redis","ping","10000","100","2","True","20000","2.951886","23220880","5784.004",
+"before","2","redis","ping","10000","100","2","True","20000","2.894148","23249248","6459.134",
+"before","3","redis","ping","10000","100","2","True","20000","2.904791","23226128","7383.363",
+"before","4","redis","ping","10000","100","2","True","20000","2.953513","23210072","7121.871",
+"before","5","redis","ping","10000","100","2","True","20000","2.777355","23175824","7139.099",
+"after","1","redis","ping","10000","100","2","False","0","",,"","InvalidDataException: Warmup failed: client 20: submission lag exceeded 20 ms; client 21: submission lag exceeded 20 ms; client 23: submission lag exceeded 20 ms; client 24: submission lag exceeded 20 ms; client 27: submission lag exceeded 20 ms"
+"after","2","redis","ping","10000","100","2","False","0","",,"","InvalidDataException: Warmup failed: client 0: submission lag exceeded 20 ms; client 1: submission lag exceeded 20 ms; client 2: submission lag exceeded 20 ms; client 3: submission lag exceeded 20 ms; client 4: submission lag exceeded 20 ms"
+"after","3","redis","ping","10000","100","2","True","20000","2.899492","14882224","8158.277",
+"after","4","redis","ping","10000","100","2","True","20000","3.048358","14875704","7192.144",
+"after","5","redis","ping","10000","100","2","True","20000","2.960539","14950880","6997.471",

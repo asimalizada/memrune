@@ -32,13 +32,55 @@ public async Task DecodeFragmented()
 }
 
 [Fact]
+public async Task FrameAtLimitIsAccepted()
+{
+    byte[] frame = BoundaryFrame();
+    Assert.Equal(RespReader.MaxFrameLength, frame.Length);
+    using var input = new MemoryStream(frame);
+    var reader = new RespReader(input);
+    byte[][]? command = await reader.ReadCommandAsync();
+    Assert.NotNull(command);
+    Assert.Equal(4, command.Length);
+    Assert.All(command, argument => Assert.Equal(RespReader.MaxBulkLength - 13, argument.Length));
+}
+
+[Fact]
+public async Task FrameOverLimitCountsEncodedLengthHeaders()
+{
+    byte[] frame = BoundaryFrame();
+    foreach ((string prefix, int offset) in new[] { ("*04\r\n", 4), ("*4\r\n$0", 5) })
+    {
+        using var input = new MemoryStream();
+        input.Write(Ascii(prefix));
+        input.Write(frame.AsSpan(offset));
+        Assert.Equal(RespReader.MaxFrameLength + 1, input.Length);
+        input.Position = 0;
+        var error = await Assert.ThrowsAsync<RespProtocolException>(() => new RespReader(input).ReadCommandAsync());
+        Assert.Contains("command frame exceeds", error.Message);
+    }
+}
+
+[Fact]
+public async Task PipelinedFramesHaveSeparateLimits()
+{
+    using var input = new MemoryStream();
+    input.Write(BoundaryFrame());
+    input.Write(Frame(Ascii("PING")));
+    input.Position = 0;
+    var reader = new RespReader(input);
+    Assert.Equal(4, (await reader.ReadCommandAsync())!.Length);
+    Equal(Ascii("PING"), (await reader.ReadCommandAsync())![0]);
+    Assert.Null(await reader.ReadCommandAsync());
+}
+[Fact]
 public async Task RejectMalformed()
 {
     foreach (string malformed in new[]
     {
         "PING\r\n", "*0\r\n", "*1\n", "*1\r\n+PING\r\n",
         "*1\r\n$-1\r\n", "*1\r\n$4\r\nPING\n",
-        "*1\r\n$4\r\nPI", "*1025\r\n", "*1\r\n$1048577\r\n"
+        "*1\r\n$4\r\nPI", "*1025\r\n", "*1\r\n$1048577\r\n",
+        "*2147483648\r\n", "*1\r\n$2147483648\r\n", "*000000000000000000001\r\n"
     })
     {
         using var input = new MemoryStream(Ascii(malformed));
@@ -202,6 +244,12 @@ static async Task Expect(Stream stream, byte[] expected)
     Equal(expected, actual);
 }
 
+static byte[] BoundaryFrame()
+{
+    // Four seven-digit bulk lengths: 4 bytes for the array header and 12 per bulk frame.
+    byte[] payload = new byte[RespReader.MaxBulkLength - 13];
+    return Frame(payload, payload, payload, payload);
+}
 static byte[] Frame(params byte[][] arguments)
 {
     using var output = new MemoryStream();

@@ -41,6 +41,18 @@ public sealed class BenchmarkToolTests
     }
 
     [Fact]
+    public async Task BufferedReplyBytesPreserveResponseOrder()
+    {
+        using var input = new MemoryStream(Encoding.ASCII.GetBytes("+PONG\r\n+PONG\r\n"));
+        var reader = new RespBenchmarkReader(input, 0);
+        byte[] expected = Encoding.ASCII.GetBytes("PONG\r\n");
+        await reader.ReadSimpleAsync(expected, CancellationToken.None);
+        await reader.ReadSimpleAsync(expected, CancellationToken.None);
+        await Assert.ThrowsAsync<EndOfStreamException>(() =>
+            reader.ReadSimpleAsync(expected, CancellationToken.None));
+    }
+
+    [Fact]
     public void FrameBuilderPreservesBinaryPayload()
     {
         byte[] frame = BenchmarkRunner.Frame(Encoding.ASCII.GetBytes("ECHO"), [0, 13, 10, 255]);
@@ -125,6 +137,101 @@ public sealed class BenchmarkToolTests
         }
     }
 
+    [Fact]
+    public void FixedRateOptionsRequireSerialRequestsAndBoundedControls()
+    {
+        Assert.True(BenchmarkOptions.TryParse(
+            ["--rate", "1000", "--clients", "2", "--operations", "30",
+             "--pipeline", "1", "--max-lag-ms", "50", "--request-timeout-ms", "100"],
+            out BenchmarkOptions? valid, out _));
+        Assert.Equal(1000, valid!.OfferedRate);
+        Assert.False(BenchmarkOptions.TryParse(
+            ["--rate", "1000", "--pipeline", "16"], out _, out _));
+        Assert.False(BenchmarkOptions.TryParse(
+            ["--rate", "0"], out _, out _));
+        Assert.False(BenchmarkOptions.TryParse(
+            ["--rate", "1000", "--max-lag-ms", "0"], out _, out _));
+    }
+
+    [Theory]
+    [InlineData("ping")]
+    [InlineData("set")]
+    [InlineData("get")]
+    public async Task FixedRateModeValidatesRealTcpReplies(string workload)
+    {
+        string output = Path.GetTempFileName();
+        using var shutdown = new CancellationTokenSource();
+        var server = new MemruneServer(0, tcpNoDelay: true, coalesceResponses: true);
+        Task running = server.RunAsync(shutdown.Token);
+        try
+        {
+            int exitCode = await BenchmarkRunner.RunAsync(
+                ["--host", "127.0.0.1", "--port", server.BoundPort.ToString(),
+                 "--workload", workload, "--clients", "2", "--operations", "30",
+                 "--pipeline", "1", "--rate", "30", "--value-size", "32",
+                 "--warmup", "4", "--repetitions", "1", "--keys", "8",
+                 "--max-lag-ms", "1000", "--output", output])
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, exitCode);
+            using JsonDocument json = JsonDocument.Parse(await File.ReadAllTextAsync(output));
+            Assert.Equal("fixedRate", json.RootElement.GetProperty("mode").GetString());
+            Assert.Equal(30, json.RootElement.GetProperty("intendedOfferedRate").GetInt32());
+            JsonElement run = json.RootElement.GetProperty("runs")[0];
+            Assert.True(run.GetProperty("valid").GetBoolean());
+            Assert.Equal(30, run.GetProperty("submittedOperations").GetInt64());
+            Assert.Equal(30, run.GetProperty("successfulOperations").GetInt64());
+            Assert.Equal(0, run.GetProperty("unsubmittedOperations").GetInt64());
+            Assert.Equal(0, run.GetProperty("timedOutOperations").GetInt32());
+            Assert.Equal(0, run.GetProperty("failedOperations").GetInt64());
+        }
+        finally
+        {
+            shutdown.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(10));
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public async Task FixedRateTimeoutInvalidatesRunWithoutDiscardingRequests()
+    {
+        string output = Path.GetTempFileName();
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task fakeServer = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            byte[] request = new byte[BenchmarkRunner.Frame(Encoding.ASCII.GetBytes("PING")).Length];
+            await client.GetStream().ReadExactlyAsync(request);
+            await release.Task; // Deliberately withhold the reply until the benchmark times out.
+        });
+        try
+        {
+            int exitCode = await BenchmarkRunner.RunAsync(
+                ["--host", "127.0.0.1", "--port", port.ToString(),
+                 "--workload", "ping", "--clients", "1", "--operations", "4",
+                 "--pipeline", "1", "--rate", "100", "--warmup", "0",
+                 "--request-timeout-ms", "50", "--repetitions", "1",
+                 "--output", output]).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, exitCode);
+            using JsonDocument json = JsonDocument.Parse(await File.ReadAllTextAsync(output));
+            JsonElement run = json.RootElement.GetProperty("runs")[0];
+            Assert.False(run.GetProperty("valid").GetBoolean());
+            Assert.Equal(1, run.GetProperty("timedOutOperations").GetInt32());
+            Assert.Equal(1, run.GetProperty("submittedOperations").GetInt64());
+            Assert.Equal(3, run.GetProperty("unsubmittedOperations").GetInt64());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("median").ValueKind);
+        }
+        finally
+        {
+            release.SetResult(true);
+            await fakeServer.WaitAsync(TimeSpan.FromSeconds(5));
+            listener.Stop();
+            File.Delete(output);
+        }
+    }
     private sealed class OneByteStream(byte[] data) : MemoryStream(data)
     {
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>

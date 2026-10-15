@@ -1,0 +1,3 @@
+phase,profiled_ping_operations,successful_ops_per_second,server_allocated_bytes_counter_sum,gen0_collections,gen1_collections,gen2_collections,gc_pause_seconds_counter_sum,user_cpu_seconds_counter_sum,system_cpu_seconds_counter_sum,monitor_lock_contentions_counter_sum,collection_duration_seconds
+before,1000000,110859.7,1769725888,210,1,1,0.773048,2.795805,15.380758,0,25
+after,1000000,122563.4,262760136,29,1,1,0.017628,0.196812,13.819882,0,25

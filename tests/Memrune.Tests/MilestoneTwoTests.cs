@@ -200,6 +200,24 @@ public sealed class MilestoneTwoTests
     }
 
     [Fact]
+    public async Task TcpEmptyKeyAndValueRemainDistinctFromMissing()
+    {
+        await WithServer(async (port, _) =>
+        {
+            using var client = await Connect(port);
+            NetworkStream stream = client.GetStream();
+            await stream.WriteAsync(Concat(
+                Frame(Bytes("SET"), [], []),
+                Frame(Bytes("GET"), []),
+                Frame(Bytes("GET"), Bytes("missing")),
+                Frame(Bytes("EXISTS"), [], []),
+                Frame(Bytes("DEL"), []),
+                Frame(Bytes("GET"), [])));
+            await Expect(stream, Bytes("+OK\r\n$0\r\n\r\n$-1\r\n:2\r\n:1\r\n$-1\r\n"));
+        });
+    }
+
+    [Fact]
     public async Task TcpExpirationWithInjectedClock()
     {
         var clock = new ManualTimeProvider();

@@ -17,6 +17,11 @@ $results = Join-Path $PSScriptRoot 'results'
 $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 $outputDirectory = if ($ResultSubdirectory) { "/results/$ResultSubdirectory" } else { '/results' }
 $csvPath = if ($OutputFile) { Join-Path $results $OutputFile } else { Join-Path $results 'resources.csv' }
+if (Test-Path $csvPath) { throw "Resource results already exist: $csvPath. Choose a new -OutputFile." }
+foreach ($target in @('memrune', 'redis')) {
+    $rawPath = Join-Path $PSScriptRoot "results/raw/$ResultSubdirectory/resource-$target.json"
+    if (Test-Path $rawPath) { throw "Raw resource results already exist: $rawPath. Choose a fresh -ResultSubdirectory." }
+}
 
 function Read-Counters([string]$target) {
     $stat = (& docker compose -f $compose exec -T $target cat /proc/1/stat) -split ' '

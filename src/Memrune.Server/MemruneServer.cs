@@ -6,7 +6,7 @@ using Memrune.Protocol;
 
 namespace Memrune.Server;
 
-public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, int maxClients = 512, IPAddress? bindAddress = null, bool tcpNoDelay = false, bool coalesceResponses = false)
+public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, int maxClients = 512, IPAddress? bindAddress = null, bool tcpNoDelay = true, bool coalesceResponses = true)
 {
     private readonly TcpListener _listener = new(bindAddress ?? IPAddress.Loopback, ValidatePort(port));
     private readonly ConcurrentDictionary<TcpClient, ClientSession> _clients = new();
@@ -118,8 +118,8 @@ public sealed class MemruneServer(int port = 6380, KeyValueStore? store = null, 
         }
         finally
         {
-            _clients.TryRemove(client, out _);
             _clientSlots.Release();
+            _clients.TryRemove(client, out _);
         }
     }
 

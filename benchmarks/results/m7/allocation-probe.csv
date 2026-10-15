@@ -1,0 +1,7 @@
+phase,component,iterations,allocated_bytes,bytes_per_operation,elapsed_seconds
+before,resp_reader_ping,100000,164828848,1648.28848,0.131
+before,command_executor_ping,100000,10400000,104,0.009
+before,coalesced_writer_ping,100000,0,0,0.010
+after,resp_reader_ping,100000,13604224,136.04224,0.062
+after,command_executor_ping,100000,10400000,104,0.008
+after,coalesced_writer_ping,100000,0,0,0.010

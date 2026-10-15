@@ -307,6 +307,53 @@ public sealed class MilestoneThreeTests
     }
 
     [Fact]
+    public async Task ShutdownWaitsForClientsDisconnectingAlongsideActiveClients()
+    {
+        for (int round = 0; round < 4; round++)
+        {
+            using var shutdown = new CancellationTokenSource();
+            var server = new MemruneServer(0);
+            Task serving = server.RunAsync(shutdown.Token);
+            TcpClient[] clients = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Connect(server.BoundPort)));
+            try
+            {
+                await Task.WhenAll(clients.Select(async client =>
+                {
+                    NetworkStream stream = client.GetStream();
+                    await stream.WriteAsync(Frame(Text("PING")));
+                    await Expect(stream, Text("+PONG\r\n"));
+                }));
+
+                TcpClient[] active = clients.Take(16).ToArray();
+                foreach (TcpClient client in active)
+                    await client.GetStream().WriteAsync(Text("*1\r\n$4\r\nPI"));
+
+                var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Task[] disconnects = clients.Skip(16).Select(async client =>
+                {
+                    await start.Task;
+                    client.Dispose();
+                }).ToArray();
+                Task stop = Task.Run(async () =>
+                {
+                    await start.Task;
+                    shutdown.Cancel();
+                });
+                start.SetResult();
+
+                await Task.WhenAll(disconnects.Append(stop)).WaitAsync(TimeSpan.FromSeconds(10));
+                await serving.WaitAsync(TimeSpan.FromSeconds(10));
+                await Task.WhenAll(active.Select(client => ExpectEndOrReset(client.GetStream())));
+            }
+            finally
+            {
+                shutdown.Cancel();
+                foreach (TcpClient client in clients) client.Dispose();
+                await serving.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+    }
+    [Fact]
     public async Task AdmissionLimitReturnsExplicitError()
     {
         await WithServer(async (port, _) =>

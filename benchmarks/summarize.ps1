@@ -10,6 +10,10 @@ $directory = Join-Path $PSScriptRoot "results/$OutputSubdirectory"
 $raw = Join-Path $PSScriptRoot "results/raw/$InputSubdirectory"
 $expectedFiles = $ExpectedConfigurations * 2
 New-Item -ItemType Directory -Force -Path $directory | Out-Null
+if ((Test-Path (Join-Path $directory 'runs.csv')) -or
+    (Test-Path (Join-Path $directory 'summary.csv'))) {
+    throw "Curated results already exist in $directory. Choose a fresh -OutputSubdirectory."
+}
 $files = @(Get-ChildItem -Path $raw -Filter '*.json' |
     Where-Object { $_.Name -match '^(memrune|redis)-(ping|set|get)-v(0|32|1024)-c(1|50|100)-p(1|16)\.json$' })
 if ($files.Count -ne $expectedFiles) { throw "Expected $expectedFiles result files; found $($files.Count)." }

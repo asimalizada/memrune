@@ -38,7 +38,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File benchmarks/summarize-tail.ps
 
 For a fresh set, call `summarize-tail.ps1` from a PowerShell prompt with `-Sources @('repeat-quota.csv','repeat-long2.csv',...) -OutputName repeat-summary.csv`. Individual repetitions should be inspected before interpreting a median. Redis controls are repeated at each quota with identical client code and workload arguments.
 
-The normal server default remains loopback binding and the original transport settings. Docker explicitly binds Memrune to its private container network. Compose publishes no database ports.
+During this Milestone 5B investigation, the normal server default was loopback binding and the original transport settings. Milestone 7 changed the normal transport default to combined mode; loopback binding remains the default. Docker explicitly binds Memrune to its private container network. Compose publishes no database ports.
 
 ## Diagnostic profiling
 
