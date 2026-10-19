@@ -1,6 +1,6 @@
 # MEMRUNE
 
-MEMRUNE is an experimental Redis-compatible in-memory database written in C# and .NET 10 for the Underbyte video *I Built My Own Redis in C#*. It is a small, inspectable engineering project and a reproducible local performance experiment. It is **not** a full Redis implementation or a production-ready service.
+MEMRUNE is an experimental Redis-compatible in-memory database written in C# and .NET 10. It is a standalone, inspectable engineering project with reproducible local performance experiments. It is **not** a full Redis implementation or a production-ready service.
 
 ## Implemented subset
 
@@ -65,7 +65,7 @@ The Compose server explicitly binds `0.0.0.0` **inside its private Docker networ
 
 ## Concurrency, reliability, and transport modes
 
-One asynchronous loop handles each admitted client and preserves response order on that connection. The store uses content-based byte-array keys and one lock, so each storage command is atomic; operations on unrelated keys also serialize. No storage lock spans network I/O. Incoming keys and values are copied into the store, and GET returns a copy. Expiration is lazy: an expired key is logically absent, while an untouched expired entry can still occupy memory. A maximum of 512 active clients is admitted by default. Frames are limited to 1,024 arguments, 1 MiB per argument, and 4 MiB of bulk payload. Malformed framing closes the affected connection after a protocol error. Shutdown cancels active sessions and closes their sockets.
+One asynchronous loop handles each admitted client and preserves response order on that connection. The store uses content-based byte-array keys and one lock, so each storage command is atomic; operations on unrelated keys also serialize. No storage lock spans network I/O. Incoming keys and values are copied into the store, and GET returns a copy. Expiration is lazy: an expired key is logically absent, while an untouched expired entry can still occupy memory. A maximum of 512 active clients is admitted by default. Frames are limited to 1,024 arguments, 1 MiB per argument, and 4 MiB per complete RESP command frame. Malformed framing closes the affected connection after a protocol error. Shutdown cancels active sessions and closes their sockets.
 
 TCP_NODELAY and coalesced RESP replies are now the normal transport defaults. The default bind remains loopback. The four modes remain selectable for experiments:
 
