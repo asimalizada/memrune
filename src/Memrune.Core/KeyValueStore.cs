@@ -40,11 +40,13 @@ public sealed class KeyValueStore(TimeProvider? timeProvider = null)
 
     public byte[]? Get(byte[] key)
     {
+        byte[]? value;
         lock (_gate)
         {
-            return TryGetLive(key, _time.GetUtcNow().UtcTicks, out Entry? entry)
-                ? entry!.Value.ToArray() : null;
+            value = TryGetLive(key, _time.GetUtcNow().UtcTicks, out Entry? entry)
+                ? entry!.Value : null;
         }
+        return value?.ToArray();
     }
 
     public long Delete(ReadOnlySpan<byte[]> keys)
